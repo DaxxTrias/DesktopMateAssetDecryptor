@@ -11,7 +11,7 @@ public class Decryptor
         }
         bool isEncrypt = args.Length >= 3 && args[2] == "E";
         string key = args[1];
-        string originalFile = args[0] + "/" + key + ".bundle";
+        string originalFile = args[0] + "/" + key;
         string encryptedFile = args[0] + "/" + SimpleAes.AesEncrypt(key);
         try
         {
