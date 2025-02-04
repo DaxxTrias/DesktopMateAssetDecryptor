@@ -1,28 +1,36 @@
-﻿using System.Security.Cryptography;
+﻿using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
 
 public class Decryptor
 {
-    private const string password = "sCHcfTxIpgO2tusgnlNqKVKsdopir0JH";
+    private const string keyFileName = "xriGM9Vwo1bXOkMVQPsnTw";
     public static void Main(string[] args)
     {
         if (args.Length < 2) {
             Console.WriteLine("<path/to/AssetBundle/directory> <AssetBundleType(iltan/miku)> [E(Encrypt)]");
             return;
         }
+        string basePath = args[0];
+        string assetName = args[1];
         bool isEncrypt = args.Length >= 3 && args[2] == "E";
-        string key = args[1];
-        string originalFile = args[0] + "/" + key;
-        string encryptedFile = args[0] + "/" + SimpleAes.AesEncrypt(key);
+
         try
         {
+            Stream keyFileStream = File.OpenRead(basePath + "/" + keyFileName);
+            string originalFile = args[0] + "/" + assetName;
+            string encryptedFile = args[0] + "/" + SimpleAes.AesEncrypt(assetName, keyFileStream);
+
+            string password = Encoding.UTF8.GetString(getKeyFileBytes(keyFileStream, getKeyFileOffset(keyFileStream, assetName, 3), 32));
+            byte[] salt = MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(assetName));
             if (isEncrypt)
             {
-                SeekableAes aesStream = new SeekableAes(File.Create(encryptedFile), password, System.Text.Encoding.UTF8.GetBytes(key + key));
+                SeekableAes aesStream = new SeekableAes(File.Create(encryptedFile), password, salt);
                 File.OpenRead(originalFile).CopyTo(aesStream);
             }
             else
             {
-                SeekableAes aesStream = new SeekableAes(File.OpenRead(encryptedFile), password, System.Text.Encoding.UTF8.GetBytes(key + key));
+                SeekableAes aesStream = new SeekableAes(File.OpenRead(encryptedFile), password, salt);
                 aesStream.CopyTo(File.Create(originalFile));
             }
         }
@@ -30,17 +38,39 @@ public class Decryptor
             Console.WriteLine("Operation failed:\n" + e.ToString());
         }
     }
+
+    public static int getKeyFileOffset(Stream fileStream, string plainText, byte charOffset)
+    {
+        byte[] plainTextBytes = Encoding.UTF8.GetBytes(plainText);
+        if (charOffset > 1)
+        {
+            for (int i = 0; i < plainTextBytes.Length; i++)
+            {
+                plainTextBytes[i] += charOffset;
+                if (plainText != "iltan" && (i & 1) == 0)
+                    plainTextBytes[i] += 2;
+            }
+        }
+        BigInteger offset = new BigInteger(MD5.Create().ComputeHash(plainTextBytes));
+        return Math.Abs((int)(offset % fileStream.Length));
+    }
+
+    public static byte[] getKeyFileBytes(Stream fileStream, int offset, int size) {
+        fileStream.Seek(offset, SeekOrigin.Begin);
+        byte[] res = new byte[size];
+        fileStream.Read(res, 0, size);
+        return res;
+    }
 }
 
 public class SimpleAes
 {
-    private const string fileKey = "YVe2SngRFQNCbPW67xrANOKMaDP8Qopn";
-    private const string fileIv = "3RSFHrtWxi7d1eAP";
-
-    public static string AesEncrypt(string plain_text)
+    public static string AesEncrypt(string plainText, Stream keyFileStream)
     {
         Aes aes = Aes.Create();
-        ICryptoTransform encryptor = aes.CreateEncryptor(System.Text.Encoding.UTF8.GetBytes(fileKey), System.Text.Encoding.UTF8.GetBytes(fileIv));
+        byte[] key = Decryptor.getKeyFileBytes(keyFileStream, Decryptor.getKeyFileOffset(keyFileStream, plainText, 1), 32);
+        byte[] iv = Decryptor.getKeyFileBytes(keyFileStream, Decryptor.getKeyFileOffset(keyFileStream, plainText, 7), 16);
+        ICryptoTransform encryptor = aes.CreateEncryptor(key, iv);
         string encrypted;
         using (MemoryStream msEncrypt = new MemoryStream())
         {
@@ -48,10 +78,10 @@ public class SimpleAes
             {
                 using (StreamWriter swEncrypt = new StreamWriter(csEncrypt))
                 {
-                    swEncrypt.Write(plain_text);
+                    swEncrypt.Write(plainText);
                 }
             }
-            encrypted = System.Convert.ToBase64String(msEncrypt.ToArray()).Replace('/', '-');
+            encrypted = Convert.ToBase64String(msEncrypt.ToArray()).Replace("/", "-").Replace("=", "");
         }
         return encrypted;
     }
